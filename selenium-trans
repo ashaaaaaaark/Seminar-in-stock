@@ -483,12 +483,7 @@ if g >= 2 or b >= 2:
 
 
     #價格選取
-    if a == 2002:
-        web = requests.get("https://tw.stock.yahoo.com/quote/2002")
-    elif a == 2881:
-        web = requests.get("https://tw.stock.yahoo.com/quote/2881")
-    elif a == 1301:
-        web = requests.get("https://tw.stock.yahoo.com/quote/1301")
+    web = requests.get("https://tw.stock.yahoo.com/quote/" + a)
 
     html = etree.HTML(web.content.decode())
 
@@ -545,20 +540,9 @@ if g >= 2 or b >= 2:
     usernameInput = driver.find_element(By.ID, "Account")
     passwordInput = driver.find_element(By.ID, "Password")
 
-    if a == 2881:  #富邦金
-        usernameInput.send_keys("lbb102077@gmail.com")
-        time.sleep(1)
-        passwordInput.send_keys("Flora0806")
-
-    elif a == 2002:  #中鋼
-        usernameInput.send_keys("0908056599")
-        time.sleep(1)
-        passwordInput.send_keys("Considermail2000123456789abcd1234")
-
-    elif a == 1301:  #台塑
-        usernameInput.send_keys("bruhh3762@gmail.com")
-        time.sleep(1)
-        passwordInput.send_keys("Considermail2000123456789abcd1234")
+    usernameInput.send_keys("xxxxxxxxxxxxxxxxxxxx")
+    time.sleep(1)
+    passwordInput.send_keys("xxxxxxxxxxx")
 
     time.sleep(1)
     signinButton = driver.find_element(By.ID, "Login")
