@@ -1,0 +1,657 @@
+from dateutil import rrule
+import urllib.request
+import matplotlib.pyplot as plt
+import datetime
+import pandas as pd
+import numpy as np
+import json
+import time
+import ssl
+import datetime
+
+
+a = int(input("stock number:"))
+n = 60
+
+today = datetime.datetime.now() + datetime.timedelta(days=-n)
+point = datetime.datetime.now().date() + datetime.timedelta(days=-n)
+
+print("計算開始日期:", point.strftime("%Y-%m-%d"))
+
+stock = str(a)
+begin_date = point.strftime("%Y-%m-%d")
+
+
+# In[2]:
+
+
+# 爬取每月股價的目標網站並包裝成函式
+def craw_one_month(stock_number,date):
+    url = (
+        "https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date="+
+        date.strftime('%Y%m%d')+
+        "&stockNo="+
+        stock_number
+    )
+    headers={"User-Agent":"Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36 QIHU 360SE"}
+    ssl._create_default_https_context = ssl._create_unverified_context
+    req = urllib.request.Request(url, headers=headers)
+    data = json.loads(urllib.request.urlopen(req).read())
+    return pd.DataFrame(data['data'],columns=data['fields'])
+
+
+# In[3]:
+
+
+def craw_stock(stock_number, start_month):
+    b_month = datetime.date(*[int(x) for x in start_month.split('-')])
+    now = datetime.datetime.now().strftime("%Y-%m-%d")         
+    e_month = datetime.date(*[int(x) for x in now.split('-')])
+    
+    result = pd.DataFrame()
+    for dt in rrule.rrule(rrule.MONTHLY, dtstart=b_month, until=e_month):
+        result = pd.concat([result,craw_one_month(stock_number,dt)],ignore_index=True)
+        time.sleep(4)
+    
+    return result
+
+df = craw_stock(stock, begin_date)
+df.set_index('日期',inplace=True)
+df['日期'] = df.index
+pd.set_option('display.max_columns',1000)
+pd.set_option('display.width',1000)
+pd.set_option('display.max_colwidth',1000)
+pd.set_option('display.unicode.ambiguous_as_wide',True)
+pd.set_option('display.unicode.east_asian_width',True)
+
+df_without_date = df.drop(columns=['日期'])
+if n <= 60: print(df_without_date)
+
+
+# In[4]:
+
+
+
+df['收盤價']=df['收盤價'].astype(float)
+df.loc[:]['收盤價'].plot(figsize=(14, 6))
+
+df['開盤價']=df['開盤價'].astype(float)
+df.loc[:]['開盤價'].plot(figsize=(14, 6))
+
+df['最低價']=df['最低價'].astype(float)
+df.loc[:]['最低價'].plot(figsize=(14, 6))
+
+df['最高價']=df['最高價'].astype(float)
+df.loc[:]['最高價'].plot(figsize=(14, 6))
+
+plt.xlabel('date')
+plt.ylabel('stock (basic factor)')
+plt.legend(loc = 'lower left')
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.grid(True)
+plt.show()
+
+
+# In[5]:
+
+
+# 创建蜡烛图
+fig, ax = plt.subplots(figsize=(14, 6))
+x_ticks = range(0, len(df), 5)  # 每隔5个数据点显示一个标签
+plt.xticks(x_ticks, df['日期'][x_ticks], rotation=20)
+
+ax.xaxis_date()  # 设置X轴为日期格式
+
+# 绘制蜡烛图
+for i, df_row in df.iterrows():
+    date = df_row['日期']
+    open_price = df_row['開盤價']
+    high = df_row['最高價']
+    low = df_row['最低價']
+    close = df_row['收盤價']
+
+    if close > open_price:
+        color = 'g'  # 上涨日绿色
+    else:
+        color = 'r'  # 下跌日红色
+
+    ax.plot([df_row['日期'], df_row['日期']], [df_row['最低價'], df_row['最高價']], color=color, linewidth=2)
+    ax.plot([df_row['日期'], df_row['日期']], [df_row['開盤價'], df_row['收盤價']], color=color, linewidth=10)
+
+# 设置标题和标签
+ax.set_xlabel("Date")
+ax.set_ylabel("Price")
+plt.grid(True)
+plt.show()
+
+
+# In[6]:
+
+
+#RSI
+
+收盤價列 = df['收盤價']
+
+
+# 計算每日漲跌幅度
+df['漲跌'] = df['收盤價'].diff()
+
+# 計算14天內的平均漲幅和跌幅
+l = 14
+df['平均UP'] = df['漲跌'].apply(lambda x: x if x > 0 else 0).rolling(l).mean()
+df['平均DN'] = df['漲跌'].apply(lambda x: -x if x < 0 else 0).rolling(l).mean()
+
+# 計算相對強弱（RS）
+df['RS'] = df['平均UP'] / df['平均DN']
+# 計算RSI
+df['RSI'] = 100 - (100 / (1 + df['RS']))
+
+# 打印包含RSI的DataFrame
+
+if n<=60: print(df[['收盤價','漲跌','平均UP','平均DN','RS','RSI']])
+
+
+# In[7]:
+
+
+# 创建图表和子图
+fig, ax1 = plt.subplots(figsize=(14, 6))
+x_ticks = np.arange(0, len(df), 5)
+plt.xticks(x_ticks, df.index[x_ticks], rotation=25)
+
+# 绘制第一组数据在第一个Y轴
+ax1.plot(df['日期'], df['收盤價'], 'g')
+ax1.set_xlabel('date')
+ax1.set_ylabel('stock(close)', color='g')
+ax1.tick_params('y', colors='g')
+
+# 创建第二个Y轴
+ax2 = ax1.twinx()
+ax2.plot(df['日期'], df['RSI'], 'b')
+ax2.set_ylabel('RSI', color='b')
+ax2.tick_params('y', colors='b')
+plt.grid(True)
+plt.show()
+
+
+# In[8]:
+
+
+#boll
+
+# 中軌（20日均線）
+df['中軌'] = df['收盤價'].rolling(window=20).mean()
+
+# 標準差
+std = df['收盤價'].rolling(window=20).std()
+
+df['上軌'] = df['中軌'] + 2 * std
+df['下軌'] = df['中軌'] - 2 * std
+df['帶寬'] = (df['上軌'] - df['下軌']) / df['中軌']
+
+if n <= 60: print(df[['上軌','中軌','下軌','帶寬']])
+
+
+# In[9]:
+
+
+df['上軌']=df['上軌'].astype(float)
+df.loc[:]['上軌'].plot(figsize=(14, 6))
+
+df['中軌']=df['中軌'].astype(float)
+df.loc[:]['中軌'].plot(figsize=(14, 6))
+
+df['下軌']=df['下軌'].astype(float)
+df.loc[:]['下軌'].plot(figsize=(14, 6))
+
+df['收盤價']=df['收盤價'].astype(float)
+df.loc[:]['收盤價'].plot(figsize=(14, 6))
+
+plt.xlabel('date')
+plt.ylabel('Boll')
+plt.legend(loc = 'lower left')
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.grid(True)
+plt.show()
+
+
+# In[10]:
+
+
+# 创建蜡烛图
+fig, ax = plt.subplots(figsize=(14, 6))
+x_ticks = range(0, len(df), 5)  # 每隔5个数据点显示一个标签
+plt.xticks(x_ticks, df['日期'][x_ticks], rotation=20)
+
+ax.xaxis_date()  # 设置X轴为日期格式
+
+# 绘制蜡烛图
+for i, df_row in df.iterrows():
+    date = df_row['日期']
+    open_price = df_row['開盤價']
+    high = df_row['最高價']
+    low = df_row['最低價']
+    close = df_row['收盤價']
+
+    if close > open_price:
+        color = 'g'  # 上涨日绿色
+    else:
+        color = 'r'  # 下跌日红色
+
+    ax.plot([df_row['日期'], df_row['日期']], [df_row['最低價'], df_row['最高價']], color=color, linewidth=2)
+    ax.plot([df_row['日期'], df_row['日期']], [df_row['開盤價'], df_row['收盤價']], color=color, linewidth=10)
+
+df['上軌']=df['上軌'].astype(float)
+df.loc[:]['上軌'].plot(figsize=(14, 6), color='r')
+
+df['中軌']=df['中軌'].astype(float)
+df.loc[:]['中軌'].plot(figsize=(14, 6), color='y')
+
+df['下軌']=df['下軌'].astype(float)
+df.loc[:]['下軌'].plot(figsize=(14, 6), color='b')
+
+    
+# 设置标题和标签
+ax.set_xlabel("Date")
+ax.set_ylabel("Price")
+plt.grid(True)
+plt.show()
+
+
+# In[11]:
+
+
+# KDJ
+
+df['最高價n'] = df['最高價'].rolling(window=n).max()
+df['最低價n'] = df['最低價'].rolling(window=n).min()
+df['RSV'] = (df['收盤價'] - df['最低價']) / (df['最高價'] - df['最低價']) * 100
+
+# 計算K值、D值和J值
+k_values = [50]  # 初始K值，一般取50
+d_values = [50]  # 初始D值
+
+for i in range(1, len(df)):
+    k = (2 / 3) * k_values[-1] + (1 / 3) * df['RSV'][i]
+    k_values.append(k)
+    d = (2 / 3) * d_values[-1] + (1 / 3) * k
+    d_values.append(d)
+
+df['K值'] = k_values
+df['D值'] = d_values
+df['J值'] = 3 * df['K值'] - 2 * df['D值']
+
+# 打印包含KDJ指標的df
+if n <= 60: print(df[['K值','D值','J值']])
+
+
+# In[12]:
+
+
+df['K值']=df['K值'].astype(float)
+df.loc[:]['K值'].plot(figsize=(14, 6), color='b')
+
+df['D值']=df['D值'].astype(float)
+df.loc[:]['D值'].plot(figsize=(14, 6), color='g')
+
+df['J值']=df['J值'].astype(float)
+df.loc[:]['J值'].plot(figsize=(14, 6), color='purple')
+
+plt.xlabel('date')
+plt.ylabel('KDJ')
+plt.legend(loc = 'lower left')
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.grid(True)
+plt.show()
+
+
+# In[13]:
+
+
+#MACD
+
+short_window = 12
+long_window = 26
+signal_window = 9
+
+df['ShortEMA'] = df['收盤價'].ewm(span=short_window, adjust=False).mean()
+df['LongEMA'] = df['收盤價'].ewm(span=long_window, adjust=False).mean()
+df['Fast'] = df['ShortEMA'] - df['LongEMA']
+df['Slow'] = df['Fast'].ewm(span=signal_window, adjust=False).mean()
+
+if n <= 60: print(df[['ShortEMA','LongEMA','Fast','Slow']])
+
+
+# In[14]:
+
+
+df['Fast']=df['Fast'].astype(float)
+df.loc[:]['Fast'].plot(figsize=(14, 6))
+
+df['Slow']=df['Slow'].astype(float)
+df.loc[:]['Slow'].plot(figsize=(14, 6))
+
+plt.xlabel('date')
+plt.ylabel('MACD')
+plt.legend(loc = 'lower left')
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.grid(True)
+plt.show()
+
+
+# In[15]:
+
+
+rsi = pd.DataFrame(df['RSI'], index=df['日期'])
+
+close = pd.DataFrame(df['收盤價'], index=df['日期'])
+up = pd.DataFrame(df['上軌'], index=df['日期'])
+md = pd.DataFrame(df['中軌'], index=df['日期'])
+dn = pd.DataFrame(df['下軌'], index=df['日期'])
+
+kk = pd.DataFrame(df['K值'], index=df['日期'])
+dd = pd.DataFrame(df['D值'], index=df['日期'])
+jj = pd.DataFrame(df['J值'], index=df['日期'])
+
+
+c = close.loc[date, '收盤價']
+r = rsi.loc[date, 'RSI']
+u = up.loc[date, '上軌']
+m = md.loc[date, '中軌']
+d = dn.loc[date, '下軌']
+kkk = kk.loc[date, 'K值']
+ddd = dd.loc[date, 'D值']
+jjj = jj.loc[date, 'J值']
+
+
+# In[16]:
+
+
+arr = [0] * 7
+
+#RSI 
+if r >= 65 :
+    print("sell RSI")
+    arr[0] = 1
+elif r <= 35 :
+    print("buy RSI")
+    arr[0] = -1
+else :
+    print("na RSI")
+    
+#boll-----------------------------------
+cu = u-c
+cd = c-d
+if c >= m :
+    print("上半", end=' ')
+    if cu <= -0.1 :
+        print("sell Boll")
+        arr[1] = 1
+    else :
+        print("na Boll")
+elif c <= m :
+    print("下半",end=' ')
+    if cd <=0.2 :
+        print("buy Boll")
+        arr[1] = -1
+    else :
+        print("na Boll")
+        
+#MACD------------------------------------
+tf = df['Fast'].iloc[-1]
+yf = df['Fast'].iloc[-2]
+ts = df['Slow'].iloc[-1]  
+ys = df['Slow'].iloc[-2]
+
+if yf < ys and tf >= ts:
+    print("buy MACD", end = '/ ')
+    arr[2] = -1
+elif yf > ys and tf <= ts:
+    print("sell MACD", end = '/ ')
+    arr[2] = 1
+else :
+    print("na MACD", end = '/ ')
+
+#KDJ------------------------------------
+
+td = df['D值'].iloc[-1]
+yd = df['D值'].iloc[-2]
+tk = df['K值'].iloc[-1]
+yk = df['K值'].iloc[-2]
+j1 = df['J值'].iloc[-1]
+j2 = df['J值'].iloc[-2]
+j3 = df['J值'].iloc[-3]
+j4 = df['J值'].iloc[-4]
+
+
+if td >= 65 :
+    print("sell ddd")
+    arr[3] = 1
+elif td <= 35 :
+    print("buy ddd")
+    arr[3] = -1
+else :
+    print("na ddd")
+
+
+if j1 >= 100 and jjj < j1:
+    print("sell jjj")
+    arr[4] = 1
+elif j1 <= 0 and jjj > j1:
+    print("buy jjj")
+    arr[4] = -1
+else:
+    print("na jjj")
+    
+
+if td<=tk and tk<=20 and yd > yk : 
+    print("buy KD交叉")
+    arr[5] = -1
+elif td>=tk and td>=80 and yd < yk:
+    print("sell KD交叉")
+    arr[5] = 1
+else :
+    print("na KD交叉")
+
+
+# In[17]:
+
+
+g = 0
+b = 0
+for i in range(0,6):
+    if arr[i] == 1:
+        g += 1
+    elif arr[i] == -1:
+        b += 1
+
+
+#_________________________________分隔島___________________________________________
+
+
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+import time
+import sys
+import random
+import requests
+from lxml import etree
+
+
+if g >= 2 or b >= 2:
+
+
+    #價格選取
+    if a == 2002:
+        web = requests.get("https://tw.stock.yahoo.com/quote/2002")
+    elif a == 2881:
+        web = requests.get("https://tw.stock.yahoo.com/quote/2881")
+    elif a == 1301:
+        web = requests.get("https://tw.stock.yahoo.com/quote/1301")
+
+    html = etree.HTML(web.content.decode())
+
+    # 委買價們
+    priceBuy = html.xpath("/html/body/div[1]/div/div/div/div/div[4]/div/div[1]/div/div[3]/div/section[1]/div[2]/div[2]/div/div[2]/div/div[1]/div[2]/div[2]/div/span/text()")
+    # 數量
+    qBuy = html.xpath("/html/body/div[1]/div/div/div/div/div[4]/div/div[1]/div/div[3]/div/section[1]/div[2]/div[2]/div/div[2]/div/div[1]/div[2]/div[1]/div/text()")
+    float_list = [int(element.replace(",", "")) for element in qBuy]
+    print(priceBuy[float_list.index(min(float_list))], "最快可以賣出")
+
+    # 計算委買價的最小值索引
+    min_buy_index = float_list.index(min(float_list))
+    # 取得對應的委買價
+    buy_price = priceBuy[min_buy_index]
+
+
+    # 委賣價們
+    priceSell = html.xpath("/html/body/div[1]/div/div/div/div/div[4]/div/div[1]/div/div[3]/div/section[1]/div[2]/div[2]/div/div[2]/div/div[2]/div[2]/div[1]/div/span/text()")
+    # 數量
+    qSell = html.xpath("/html/body/div[1]/div/div/div/div/div[4]/div/div[1]/div/div[3]/div/section[1]/div[2]/div[2]/div/div[2]/div/div[2]/div[2]/div[2]/div/text()")
+    float_list = [int(element.replace(",", "")) for element in qSell]
+    print(priceSell[float_list.index(min(float_list))], "最快可以買到")
+
+    # 計算委賣價的最小值索引
+    min_sell_index = float_list.index(min(float_list))
+    # 取得對應的委賣價
+    sell_price = priceSell[min_sell_index]
+
+    price = {
+        'priceBuy' : buy_price,
+        'priceSell': sell_price
+    }
+
+
+    delay_choices = [1, 3, 4, 2, 6]  #延遲的秒數
+    delay = random.choice(delay_choices)  #隨機選取秒數
+    
+
+    #不閃退
+    
+    options = webdriver.ChromeOptions()
+    options.add_argument('C:/Users/user/Downloads/chromedriver-win64/chromedriver-win64')
+    options.add_argument('disable-infobars')
+    options.add_experimental_option('detach', True)
+
+    driver = webdriver.Chrome(options=options)
+
+    driver.get("https://www.cmoney.tw/identity/account/login")
+
+    time.sleep(delay)
+
+
+    #帳密登陸
+    usernameInput = driver.find_element(By.ID, "Account")
+    passwordInput = driver.find_element(By.ID, "Password")
+
+    if a == 2881:  #富邦金
+        usernameInput.send_keys("lbb102077@gmail.com")
+        time.sleep(1)
+        passwordInput.send_keys("Flora0806")
+
+    elif a == 2002:  #中鋼
+        usernameInput.send_keys("0908056599")
+        time.sleep(1)
+        passwordInput.send_keys("Considermail2000123456789abcd1234")
+
+    elif a == 1301:  #台塑
+        usernameInput.send_keys("bruhh3762@gmail.com")
+        time.sleep(1)
+        passwordInput.send_keys("Considermail2000123456789abcd1234")
+
+    time.sleep(1)
+    signinButton = driver.find_element(By.ID, "Login")
+    signinButton.send_keys(Keys.ENTER)
+
+    time.sleep(delay)
+
+
+    # 雙重認證不啟用
+    check_url = "https://www.cmoney.tw/identity/account/login/two-factor-options?"
+
+    try:
+        skipButton = driver.find_element(By.ID, "btn btn-pure")
+        skipButton.send_keys(Keys.ENTER)
+        time.sleep(1)
+
+    except:
+        pass
+
+    driver.get("https://www.cmoney.tw/vt/main-page.aspx")
+
+
+    # 帳號選擇
+    choose_url = "https://www.cmoney.tw/identity/account/select?"
+
+    try:
+        accountchoose = driver.find_element(By.XPATH, '//*[@id="9OVQ2buHA0qwCdbKwWVdeTchT9JLyFWBEWu2qPFyrjw"]/div')
+        accountchoose.click()
+
+        driver.get("https://www.cmoney.tw/vt/main-page.aspx")
+
+    except:
+        pass 
+
+
+    #輸入股票代碼
+    textBoxCommkeyInput = driver.find_element(By.ID, "textBoxCommkey")
+    textBoxCommkeyInput.send_keys(a)
+    textBoxCommkeyInput.send_keys(Keys.ENTER)
+
+    #現股
+    cashClick = driver.find_element(By.XPATH, '//*[@id="AccountOrderSelect"]/ul/li[1]/a')
+    cashClick.click()
+
+    #選擇買或賣
+    args = sys.argv[1:]
+
+    if b >= 2:
+
+        print("Received buy signal!")
+        Bs_BClick= driver.find_element(By.ID, "Bs_B")
+        Bs_BClick.click()
+
+    elif g >= 2:
+
+        print("Received sell signal!")
+        Bs_SClick= driver.find_element(By.ID, "Bs_S")
+        Bs_SClick.click()
+    
+
+    #價錢
+    if g >= 2:
+        ccc = price['priceBuy']
+    elif b >= 2:
+        ccc = price['priceSell']
+
+    print(ccc)
+
+    PriceInput = driver.find_element(By.ID, "TextBoxPrice")
+    driver.execute_script("arguments[0].value = '';", PriceInput)
+    time.sleep(1)
+    PriceInput.send_keys(ccc)
+
+    #幾張
+    TextBoxQtyInput = driver.find_element(By.ID, "TextBoxQty")
+
+    TextBoxQtyInput.clear()
+
+    if g == 2 or b == 2:
+        TextBoxQtyInput.send_keys("1")
+    elif g == 3 or b == 3:
+        TextBoxQtyInput.send_keys("2")
+    elif b >= 4 or b >= 4:
+        TextBoxQtyInput.send_keys("3")
+
+    time.sleep(1)
+
+    #買賣
+    OrderbtnClick = driver.find_element(By.ID, "Orderbtn")
+
+    OrderbtnClick.click()
+    
+    
+else :
+    pass
+    print("nothing happened")
