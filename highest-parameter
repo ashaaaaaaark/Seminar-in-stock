@@ -1,0 +1,307 @@
+import urllib.request
+import pandas as pd
+import json
+import requests
+import pandas as pd
+from io import StringIO
+
+res = requests.get("https://isin.twse.com.tw/isin/C_public.jsp?strMode=2")
+html_string = res.text
+num_df = pd.read_html(StringIO(html_string))[0]
+num_df = num_df.drop(num_df.index[1000:38734])
+
+for g in range(2,997): #可以分三個part去跑 2~996________________________________________________！！
+
+    if g in (462,570,682,685,694,735,827,832,839,860,875,890,898,899,900,901,902,903,949): #跳過202308還未上市的公司
+        print(num_df.iloc[g,0][:4],"。X")
+        continue
+
+    else:
+
+        stock = num_df.iloc[g,0][:4]
+        print(stock," ",num_df.iloc[g,0][5:],"。",end='')
+
+        fields = None
+        data_record = []
+        open_day = []
+
+
+        for year in range(2023, 2024):  
+            for month in range(7, 13):   
+                # 計算日期字串
+                date_str = f"{year}{month:02d}01"
+                url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=" + date_str + "&stockNo=" + str(stock)
+                
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36 QIHU 360SE"}
+                
+                req = urllib.request.Request(url, headers=headers)
+                response = urllib.request.urlopen(req)
+                req_data = json.loads(response.read())
+                
+                # 檢查是否存在資料鍵
+                if 'data' in req_data:
+                    # 將資料加入 data_record
+                    data_record.extend(req_data['data'])
+                    # 計算每個月的開盤天數
+                    open_day.append(len(req_data['data']))
+                else:
+                    print(f"No data available for {date_str}", end='')
+                    
+        for year in range(2024, 2025):  
+            for month in range(1, 5):   
+                # 計算日期字串
+                date_str = f"{year}{month:02d}01"
+                url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=" + date_str + "&stockNo=" + str(stock)
+                
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36 QIHU 360SE"}
+                
+                req = urllib.request.Request(url, headers=headers)
+                response = urllib.request.urlopen(req)
+                req_data = json.loads(response.read())
+                
+                # 檢查是否存在資料鍵
+                if 'data' in req_data:
+                    # 將資料加入 data_record
+                    data_record.extend(req_data['data'])
+                    # 計算每個月的開盤天數
+                    open_day.append(len(req_data['data']))
+                else:
+                    print(f"\nNo data available for {date_str}")
+
+
+        df = pd.DataFrame(data_record,columns=fields)
+        # 0日期 1成交股數 2成交金額 3開盤價 4最高價 5最低價 6收盤價 7漲跌價差 8成交筆數
+
+
+        df.set_index(0, inplace=True)
+        pd.set_option('display.max_columns',1000)
+        pd.set_option('display.width',1000)
+        pd.set_option('display.max_colwidth',1000)
+        pd.set_option('display.unicode.ambiguous_as_wide',True)
+        pd.set_option('display.unicode.east_asian_width',True)
+        
+        def clean_value(value):
+            if value == '--':  # 如果是"--"，直接返回 None
+                return None
+            return value
+
+        df = df.map(clean_value)
+
+        df = df.dropna()
+
+        df['開盤價']=df[3].str.replace(',', '').astype(float)
+        df['最低價']=df[5].str.replace(',', '').astype(float)
+        df['最高價']=df[4].str.replace(',', '').astype(float)
+        df['收盤價']=df[6].str.replace(',', '').astype(float)
+
+        analyze_df = pd.DataFrame()
+
+        #_______________________________________________________________________________________________________
+
+        # RSI
+        # 每日漲跌幅度
+        analyze_df['漲跌'] = df['收盤價'].diff()
+
+        # 14天內的平均漲幅和跌幅
+        l = 14
+        analyze_df['平均UP'] = analyze_df['漲跌'].apply(lambda x: x if x > 0 else 0).rolling(l).mean()
+        analyze_df['平均DN'] = analyze_df['漲跌'].apply(lambda x: -x if x < 0 else 0).rolling(l).mean()
+        
+        # 相對強弱（RS）
+        analyze_df['RS'] = analyze_df['平均UP'] / analyze_df['平均DN']
+
+        # RSI
+        analyze_df['RSI'] = 100 - (100 / (1 + analyze_df['RS']))
+
+
+        #boll
+        # 中軌（20日均線）
+        analyze_df['中軌'] = df['收盤價'].rolling(window=20).mean()
+
+        # 標準差
+        std = df['收盤價'].rolling(window=20).std()
+
+        analyze_df['上軌'] = analyze_df['中軌'] + 2 * std
+        analyze_df['下軌'] = analyze_df['中軌'] - 2 * std
+        analyze_df['帶寬'] = (analyze_df['上軌'] - analyze_df['下軌']) / analyze_df['中軌']
+
+
+        # KDJ
+        analyze_df['RSV'] = (df['收盤價'] - df['最低價']) / (df['最高價'] - df['最低價']) * 100
+
+        k_values = [50]  # 初始K值 取50
+        d_values = [50]  # 初始D值
+
+        for i in range(1, len(df)):
+            k = (2 / 3) * k_values[-1] + (1 / 3) * analyze_df['RSV'].iloc[i]
+            k_values.append(k)
+            d = (2 / 3) * d_values[-1] + (1 / 3) * k
+            d_values.append(d)
+
+        analyze_df['K值'] = k_values
+        analyze_df['D值'] = d_values
+        analyze_df['J值'] = 3 * analyze_df['K值'] - 2 * analyze_df['D值']
+
+
+        #MACD
+        short_window = 12
+        long_window = 26
+        signal_window = 9
+
+        analyze_df['ShortEMA'] = df['收盤價'].ewm(span=short_window, adjust=False).mean()
+        analyze_df['LongEMA'] = df['收盤價'].ewm(span=long_window, adjust=False).mean()
+        analyze_df['Fast'] = analyze_df['ShortEMA'] - analyze_df['LongEMA']
+        analyze_df['Slow'] = analyze_df['Fast'].ewm(span=signal_window, adjust=False).mean()
+
+        #______________________________________________________________________________________________________
+
+        analyze_df.to_csv("C:/Users/BUBU/backtesting.csv")
+        df.to_csv("C:/Users/BUBU/2023_price.csv")
+
+        df = pd.read_csv('C:/Users/BUBU/backtesting.csv')
+        price_df = pd.read_csv('C:/Users/BUBU/2023_price.csv')
+
+        #______________________________________________________________________________________________________
+
+        rate = 0
+        zrsiub = 0
+        zrsidb = 0
+        zddub = 0
+        zdddb = 0
+        zjjub = 0
+        zjjdb = 0
+        zbollub = 0
+        zbolldb = 0
+        zkdub = 0
+        zkddb = 0
+        rsiub = 80
+        rsidb = 20
+
+        for a in range(1,6): #RSI
+            
+            ddub = 80
+            dddb = 20
+            for b in range(1,6): #D值
+                
+                jjub = 110
+                jjdb = -10
+                for c in range(1,6): #J
+                    
+                    bollub = 0.2
+                    bolldb = 0.2
+                    for d in range(1,6): #Boll
+                        
+                        kdub = 80
+                        kddb = 20
+                        for e in range(1,6): #KD
+
+                            for f in range(0,1): #MACD無參數
+
+                                own_stock = 0
+                                own_money = 100000
+                                
+                                for i in range(21,148):  # 8月第一天到隔年1月最後一天
+                                    
+                                    rsi = df.iloc[i]["RSI"]
+                                    tj = df.iloc[i]["J值"]
+                                    yj = df.iloc[i-1]["J值"]
+                                    td = df.iloc[i]["D值"]
+                                    yd = df.iloc[i-1]["D值"]
+                                    tk = df.iloc[i]["K值"]
+                                    yk = df.iloc[i-1]["K值"]
+                                    tf = df.iloc[i]["Fast"]
+                                    yf = df.iloc[i-1]["Fast"]
+                                    ts = df.iloc[i]["Slow"]
+                                    ys = df.iloc[i-1]["Slow"]
+                                    cu = df.iloc[i]["上軌"] - price_df.iloc[i]["收盤價"] #u-c
+                                    cd = price_df.iloc[i]["收盤價"] - df.iloc[i]["下軌"] #c-d
+                                    price = price_df.iloc[i]['開盤價']
+
+                                    if rsi >= rsiub:
+                                        own_stock -= 1
+                                        own_money += price 
+                                        own_money -= 0.004425
+                                    elif rsi <= rsidb:
+                                        own_stock += 1
+                                        own_money -= price * 1.001425
+                                    else:
+                                        pass
+
+                                    if td >= ddub:
+                                        own_stock -= 1
+                                        own_money += price
+                                        own_money -= 0.004425
+                                    elif td <= dddb:
+                                        own_stock += 1
+                                        own_money -= price * 1.001425
+                                    else:
+                                        pass
+                                    
+                                    if yj >= jjub and tj < yj:
+                                        own_stock -= 1
+                                        own_money += price
+                                        own_money -= 0.004425
+                                    elif yj <= jjdb and tj > yj:
+                                        own_stock += 1
+                                        own_money -= price * 1.001425
+                                    else:
+                                        pass
+                                    
+                                    if cu >= bollub:
+                                        own_stock -= 1
+                                        own_money += price
+                                        own_money -= 0.004425
+                                    elif cd <= bolldb:
+                                        own_stock += 1
+                                        own_money -= price * 1.001425
+                                    else:
+                                        pass
+                                    
+                                    if td > tk and td >= kdub:
+                                        own_stock -= 1
+                                        own_money += price
+                                        own_money -= 0.004425
+                                    elif td < tk and tk <= kddb:
+                                        own_stock += 1
+                                        own_money -= price * 1.001425
+                                    else:
+                                        pass
+                                    
+                                    if tf > ts and yf <= ys:
+                                        own_stock -= 1
+                                        own_money += price
+                                        own_money -= 0.004425
+                                    elif tf < ts and yf >= ys:
+                                        own_stock += 1
+                                        own_money -= price * 1.001425
+                                    else:
+                                        pass
+                                    
+                                new_rate = ((own_stock * price) + own_money)/100000
+                                #print("RSI:",rsiub,"/",rsidb," D:",ddub,"/",dddb," J:",jjub,"/",jjdb," Boll:",bollub,"/",bolldb," KD:",kdub,"/",kddb,"。",new_rate)
+                                
+                                if new_rate > rate:
+                                    rate = new_rate
+                                    zrsiub = rsiub
+                                    zrsidb = rsidb
+                                    zddub = ddub
+                                    zdddb = dddb
+                                    zjjub = jjub
+                                    zjjdb = jjdb
+                                    zbollub = bollub
+                                    zbolldb = bolldb
+                                    zkdub = kdub
+                                    zkddb = kddb
+                                    
+                            kdub -= 5
+                            kddb += 5
+                        bollub -= 0.1
+                        bolldb -= 0.1
+                    jjub -= 5
+                    jjdb += 5
+                ddub -= 5
+                dddb += 5
+            rsiub -= 5
+            rsidb += 5
+            
+        print("RSI:",zrsiub,"/",zrsidb,"D:",zddub,"/",zdddb,"J:",zjjub,"/",zjjdb,"Boll:",zbollub,"/",zbolldb,"KD:",zkdub,"/",zkddb,"。",rate)
