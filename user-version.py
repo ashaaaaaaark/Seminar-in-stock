@@ -542,15 +542,3 @@ elif td==tk and td>=80:
 else :
     print("na KD細交")
 
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
